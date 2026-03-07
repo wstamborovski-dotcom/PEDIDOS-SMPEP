@@ -1,8 +1,10 @@
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
+    <link rel="icon" href="favicon.png" type="image/png">
     <meta charset="UTF-8">
-    <title>SMPEP - CENTRAL DE PEDIDOS</title>
+    <title>Estação de Pedidos do SMPEP</title>
+    <link rel="icon" type="image/png" href="mainico.png">
     <style>
         body { font-family: 'Segoe UI', sans-serif; background-color: #f0f2f5; margin: 0; padding: 10px; color: #333; font-size: 10px; display: flex; gap: 10px; height: 97vh; overflow: hidden; }
         .sidebar-left, .sidebar-right { width: 260px; background: #fff; padding: 10px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); display: flex; flex-direction: column; }
@@ -14,7 +16,7 @@
         details { margin-bottom: 4px; border: 1px solid #eee; border-radius: 8px; overflow: hidden; }
         summary { padding: 8px; background: #f8fafc; cursor: pointer; font-weight: bold; color: #217346; list-style: none; border-bottom: 1px solid #eee; }
         summary:hover { background: #edf2f7; }
-        .g-box { padding: 5px; background: white; }
+        .g-box, .g-box-paci { padding: 5px; background: white; }
         .item-chip { display: inline-flex; align-items: center; background: #e2e8f0; padding: 3px 8px; border-radius: 10px; margin: 2px; gap: 5px; border: 1px solid #cbd5e1; font-weight: bold; }
         .qtd-click { background: #217346; color: white; padding: 1px 5px; border-radius: 4px; cursor: pointer; margin-right: 2px; }
         .top-bar { display: flex; gap: 6px; background: #f8f9fa; padding: 10px; border-radius: 8px; margin-bottom: 15px; align-items: center; }
@@ -93,7 +95,69 @@
 </div>
 
 <script>
-    let bd = JSON.parse(localStorage.getItem('bd_v49')) || { materiais: [], pacientes: [], kits: [], gruposMat: ["GERAL"] };
+    function moverItem(lista, index, direcao) {
+        let novaPos = index + direcao;
+        if (novaPos >= 0 && novaPos < lista.length) {
+            // Técnica de desestruturação para trocar as posições
+            [lista[index], lista[novaPos]] = [lista[novaPos], lista[index]];
+        }
+    }
+
+    function addNovoPaciRapido() {
+        const nome = prompt("Nome do Paciente:");
+        if(!nome) return;
+        const pront = prompt("Prontuário (ID):", Date.now().toString().slice(-6));
+        if(pront) {
+            bd.pacientes.push({id: pront, nome: nome.toUpperCase(), cor: '#2ecc71', grupo: 'GERAL'});
+            salvarBD();
+            renderGerenciador();
+        }
+    }
+
+    function editarPaciDados(id) {
+        const p = bd.pacientes.find(x => x.id === id);
+        if(!p) return;
+        const novoNome = prompt("Editar Nome:", p.nome);
+        const novoId = prompt("Editar Prontuário (ID):", p.id);
+        if(novoNome) p.nome = novoNome.toUpperCase();
+        if(novoId) p.id = novoId;
+        salvarBD();
+        renderGerenciador();
+    }
+
+    function dropPacienteNoGrupo(e, nomeGrupo) {
+        e.preventDefault();
+        const paciId = e.dataTransfer.getData('paci_id');
+        // Procuramos no banco pelo ID exato
+        const paci = bd.pacientes.find(p => String(p.id) === String(paciId));
+        
+        if (paci) {
+            paci.grupo = nomeGrupo;
+            salvarBD();
+            atualizarGerenciadorComScroll(); // Usa a função com scroll
+        }
+    }
+
+    function removerPaciDoGrupo(paciId) {
+        const paci = bd.pacientes.find(p => String(p.id) === String(paciId));
+        if (paci) {
+            paci.grupo = "GERAL";
+            salvarBD();
+            atualizarGerenciadorComScroll(); // Usa a função com scroll
+        }
+    }
+
+    // Atualize também o onclick da bolinha de cor dentro do renderGerenciador para:
+    // onclick="bd.pacientes.find(x=>x.id==='${p.id}').cor=proximaCor('${p.cor}'); salvarBD(); atualizarGerenciadorComScroll()"
+
+    // 1. INICIALIZAÇÃO DO BANCO DE DADOS
+    let bd = JSON.parse(localStorage.getItem('bd_v49')) || { 
+        materiais: [], 
+        pacientes: [], 
+        kits: [], 
+        gruposMat: ["GERAL"],
+        gruposPaci: ["GERAL"] 
+    };
     let listaGlobal = [];
     let abaAtual = 'mat';
 
@@ -155,6 +219,24 @@
         atualizarResumo();
     }
 
+    function salvarBD() { 
+        localStorage.setItem('bd_v49', JSON.stringify(bd)); 
+        renderLaterais(); 
+    }
+
+    // Função para atualizar o gerenciador sem perder o scroll
+    function atualizarGerenciadorComScroll() {
+        const modalCorpo = document.getElementById('corpoGerenciador');
+        const scrollPos = modalCorpo.scrollTop; // Salva a posição atual
+        
+        renderGerenciador(); // Reconstrói a interface
+        
+        // Devolve o scroll para onde estava (com um pequeno delay para o navegador processar o novo HTML)
+        setTimeout(() => {
+            modalCorpo.scrollTop = scrollPos;
+        }, 10);
+    }
+
     function dropItemNaLinha(e, idx) {
         e.stopPropagation(); e.preventDefault();
         const mData = e.dataTransfer.getData('material_data');
@@ -175,28 +257,42 @@
         if (nova !== null && !isNaN(nova) && nova > 0) { listaGlobal[pIdx].itens[iIdx].qtd = parseInt(nova); renderTabela(); }
     }
 
-function colarDoExcel() {
+    function colarDoExcel() {
         const texto = prompt("Cole os dados (Coluna B: Prontuário, Coluna C: Nome):");
         if (!texto) return;
+
+        // Pergunta o grupo para os pacientes que estão sendo importados
+        let grupoAlvo = prompt("Para qual grupo deseja mover estes pacientes?", "GERAL");
+        if (!grupoAlvo) grupoAlvo = "GERAL";
+        grupoAlvo = grupoAlvo.toUpperCase();
+
+        // Se o grupo não existir no banco, adiciona automaticamente
+        if (!bd.gruposPaci.includes(grupoAlvo)) {
+            bd.gruposPaci.push(grupoAlvo);
+        }
         
         texto.split('\n').forEach(linha => {
             if (!linha.trim()) return;
             const cols = linha.split('\t');
             
             if (cols.length >= 3) {
-                const pront = cols[1].trim(); // Coluna B
-                const nomePaci = cols[2].trim().toUpperCase(); // Coluna C
+                const pront = cols[1].trim();
+                const nomePaci = cols[2].trim().toUpperCase();
                 const textoMaterial = cols[14] || ""; 
 
-                // 1. Lógica para o Banco de Dados (Persistência)
-                let pacienteNoBD = bd.pacientes.find(p => p.id === pront);
+                let pacienteNoBD = bd.pacientes.find(p => String(p.id) === String(pront));
+                
                 if (!pacienteNoBD) {
-                    bd.pacientes.push({ id: pront, nome: nomePaci, cor: "#2ecc71" });
-                    salvarBD(); // Salva no localStorage e atualiza a lateral automaticamente
+                    // Se não existe, cria com o grupo escolhido
+                    bd.pacientes.push({ id: pront, nome: nomePaci, cor: "#2ecc71", grupo: grupoAlvo });
+                } else {
+                    // Se já existe, apenas atualiza o grupo para o novo
+                    pacienteNoBD.grupo = grupoAlvo;
                 }
+                
+                salvarBD();
 
-                // 2. Lógica para a Tabela Atual (Interface)
-                let paciNaLista = listaGlobal.find(p => p.id === pront);
+                let paciNaLista = listaGlobal.find(p => String(p.id) === String(pront));
                 if (!paciNaLista) {
                     paciNaLista = { id: pront, nome: nomePaci, itens: [] };
                     listaGlobal.push(paciNaLista);
@@ -238,18 +334,28 @@ function colarDoExcel() {
         input.value = "";
     }
 
-    function baixarCSV() {
-        let csv = "\uFEFFProntuario;P1;Q1;P2;Q2;P3;Q3;P4;Nome_Paciente\n";
+   function baixarCSV() {
+        // Cabeçalho atualizado: Coluna J é a décima coluna (Setor/Grupo)
+        let csv = "\uFEFFProntuario;P1;Q1;P2;Q2;P3;Q3;P4;Nome_Paciente;Setor\n";
+        
         listaGlobal.forEach(p => {
-            if (p.itens.length === 0) csv += `${p.id};;;;;;;;${p.nome}\n`;
-            else {
+            // Busca o grupo (setor) do paciente no banco de dados
+            const dadosPaciBD = bd.pacientes.find(dbP => String(dbP.id) === String(p.id));
+            const setor = dadosPaciBD ? (dadosPaciBD.grupo || "GERAL") : "GERAL";
+
+            if (p.itens.length === 0) {
+                // Linha vazia de produtos, mas com Nome e Setor
+                csv += `${p.id};;;;;;;;${p.nome};${setor}\n`;
+            } else {
+                // Divide os itens em linhas (máximo 3 produtos por linha no padrão do seu CSV)
                 for (let i = 0; i < p.itens.length; i += 3) {
                     let linha = `${p.id}`;
                     for (let j = 0; j < 3; j++) {
                         let it = p.itens[i + j];
                         linha += it ? `;${it.cod};${it.qtd}` : ";;";
                     }
-                    csv += linha + `;;${p.nome}\n`;
+                    // Adiciona P4 (vazio conforme seu padrão), Nome do Paciente e o Setor na Coluna J
+                    csv += linha + `;;${p.nome};${setor}\n`;
                 }
             }
         });
@@ -260,7 +366,10 @@ function colarDoExcel() {
     }
 
     function renderLaterais() {
+        // Atualiza o contador de pacientes
         document.getElementById('countPaci').innerText = bd.pacientes.length;
+
+        // Materiais por Grupo
         const lm = document.getElementById('listaMatLateral'); lm.innerHTML = "";
         (bd.gruposMat || ["GERAL"]).forEach(g => {
             const det = document.createElement('details');
@@ -274,18 +383,28 @@ function colarDoExcel() {
             });
             if(box.children.length > 0) lm.appendChild(det);
         });
+
+        // Kits
         const lk = document.getElementById('listaKitsLateral'); lk.innerHTML = "";
         bd.kits.forEach(k => {
             const b = document.createElement('div'); b.className='balao'; b.draggable=true; b.style.borderLeft="4px solid orange"; b.innerHTML=`<b>${k.nome}</b>`;
             b.ondragstart=(e)=>e.dataTransfer.setData('kit', JSON.stringify(k));
             lk.appendChild(b);
         });
+
+        // Pacientes por Grupo
         const lp = document.getElementById('listaPaciLateral'); lp.innerHTML = "";
-        bd.pacientes.sort((a,b)=>a.nome.localeCompare(b.nome)).forEach(p => {
-            const d = document.createElement('div'); d.className = 'balao'; d.draggable = true;
-            d.innerHTML = `<div class="dot" style="background:${p.cor || '#2ecc71'}"></div><b>${p.nome}</b>`;
-            d.ondragstart = (e) => e.dataTransfer.setData('paciente', JSON.stringify({pront:p.id, nome:p.nome}));
-            lp.appendChild(d);
+        (bd.gruposPaci || ["GERAL"]).forEach(g => {
+            const det = document.createElement('details');
+            det.innerHTML = `<summary>📂 ${g}</summary><div class="g-box-paci"></div>`;
+            const box = det.querySelector('.g-box-paci');
+            bd.pacientes.filter(p => (p.grupo || "GERAL") === g).sort((a,b)=>a.nome.localeCompare(b.nome)).forEach(p => {
+                const d = document.createElement('div'); d.className = 'balao'; d.draggable = true;
+                d.innerHTML = `<div class="dot" style="background:${p.cor || '#2ecc71'}"></div><b>${p.nome}</b>`;
+                d.ondragstart = (e) => e.dataTransfer.setData('paciente', JSON.stringify({pront:p.id, nome:p.nome}));
+                box.appendChild(d);
+            });
+            if(box.children.length > 0 || g === "GERAL") lp.appendChild(det);
         });
     }
 
@@ -293,56 +412,127 @@ function colarDoExcel() {
     function fecharModal() { document.getElementById('modalGerenciar').style.display='none'; }
     function setTab(t, e) { abaAtual = t; document.querySelectorAll('.tab-link').forEach(l => l.classList.remove('active')); e.target.classList.add('active'); renderGerenciador(); }
 
-    function renderGerenciador() {
-        const c = document.getElementById('corpoGerenciador'); c.innerHTML = "";
-        const f = document.getElementById('footerModal'); f.innerHTML = "";
-        if(abaAtual === 'paci') {
-            c.style.display="block"; c.style.overflowY="auto";
-            bd.pacientes.forEach((p,i)=>{
-                const cor = p.cor || "#2ecc71";
-                c.innerHTML += `<div style="display:flex; gap:5px; margin-bottom:2px; align-items:center">
-                    <div class="dot" style="background:${cor}; width:15px; height:15px" onclick="bd.pacientes[${i}].cor=proximaCor('${cor}'); salvarBD(); renderGerenciador()"></div>
-                    <input style="flex:1" value="${p.id}" onchange="bd.pacientes[${i}].id=this.value; salvarBD()">
-                    <input style="flex:3" value="${p.nome}" onchange="bd.pacientes[${i}].nome=this.value.toUpperCase(); salvarBD()">
-                    <button onclick="bd.pacientes.splice(${i},1); salvarBD(); renderGerenciador()">🗑️</button>
+function renderGerenciador() {
+    const c = document.getElementById('corpoGerenciador'); c.innerHTML = "";
+    const f = document.getElementById('footerModal'); f.innerHTML = "";
+    
+    if(abaAtual === 'paci') {
+        // PARTE 3: Estrutura corrigida com scroll independente para não pular
+        c.innerHTML = `
+            <div style="display:flex; gap:20px; height:100%; overflow:hidden;">
+                <div style="flex:1; border-right:1px solid #eee; padding-right:10px; overflow-y:auto; height:100%;">
+                    <h4 style="margin-top:0">👥 Editar & Arrastar</h4>
+                    <div id="gridPaciGerente" class="grid-7-colunas"></div>
+                </div>
+                <div style="flex:0.6; overflow-y:auto; height:100%; padding-bottom:80px; box-sizing:border-box;" id="areaGruposPaci">
+                    <h4 style="margin-top:0">📂 Grupos (Solte aqui)</h4>
+                </div>
+            </div>`;
+
+        const grid = document.getElementById('gridPaciGerente');
+        bd.pacientes.sort((a,b)=>a.nome.localeCompare(b.nome)).forEach((p, i) => {
+            const b = document.createElement('div'); 
+            b.className='balao-grid'; 
+            b.draggable=true;
+            b.style.position = "relative";
+            
+            // CORREÇÃO: Chamando atualizarGerenciadorComScroll() ao mudar a cor
+            b.innerHTML=`
+                <div class="dot" style="background:${p.cor}; width:12px; height:12px; margin:0 auto 5px; cursor:pointer" 
+                     onclick="bd.pacientes.find(x=>x.id==='${p.id}').cor=proximaCor('${p.cor}'); salvarBD(); atualizarGerenciadorComScroll()" title="Mudar Cor"></div>
+                <b style="display:block; margin-bottom:5px; cursor:grab">${p.nome}</b>
+                <div style="display:flex; gap:2px; justify-content:center">
+                    <button onclick="editarPaciDados('${p.id}')" style="font-size:8px; padding:2px; cursor:pointer">✏️</button>
+                    <button onclick="if(confirm('Excluir ${p.nome}?')){bd.pacientes.splice(bd.pacientes.findIndex(x=>x.id==='${p.id}'),1); salvarBD(); atualizarGerenciadorComScroll()}" style="font-size:8px; padding:2px; cursor:pointer">🗑️</button>
+                </div>
+            `;
+            b.ondragstart=(e)=>e.dataTransfer.setData('paci_id', p.id);
+            grid.appendChild(b);
+        });
+
+        const area = document.getElementById('areaGruposPaci');
+        (bd.gruposPaci || ["GERAL"]).forEach(g => {
+            const gBox = document.createElement('div');
+            // Estilo mais compacto para os grupos
+            gBox.style = "border:1px dashed #217346; margin-bottom:8px; padding:8px; border-radius:8px; background:#f9f9f9";
+            gBox.innerHTML = `
+                <div style="font-weight:bold; color:#217346; margin-bottom:5px; display:flex; justify-content:space-between; font-size:9px">
+                    <span>📂 ${g}</span>
+                    <span style="font-size:8px; color:#666">${bd.pacientes.filter(p => (p.grupo || "GERAL") === g).length} paci</span>
+                </div>
+                <div class="dropzone-kit" style="min-height:35px" ondragover="event.preventDefault()" ondrop="dropPacienteNoGrupo(event, '${g}')">
+                    ${bd.pacientes.filter(p => (p.grupo || "GERAL") === g).map(p => `
+                        <div class="item-chip" style="font-size:8px">
+                            <div class="dot" style="background:${p.cor}; width:6px; height:6px"></div>
+                            ${p.nome}
+                            <span onclick="removerPaciDoGrupo('${p.id}')" style="color:red; cursor:pointer; font-weight:bold"> ×</span>
+                        </div>
+                    `).join('') || '<span style="color:#aaa; font-size:8px">Arraste aqui</span>'}
                 </div>`;
-            });
-            f.innerHTML = `<button class="btn btn-add" onclick="bd.pacientes.push({id:'0', nome:'NOVO', cor:'#2ecc71'}); salvarBD(); renderGerenciador()">+ PACIENTE</button>`;
-        } else if(abaAtual === 'mat') {
-            c.style.display="block"; c.style.overflowY="auto";
-            bd.materiais.forEach((m,i)=>{
-                c.innerHTML += `<div style="display:flex; gap:5px; margin-bottom:2px">
-                    <input style="flex:2" value="${m.nome}" onchange="bd.materiais[${i}].nome=this.value.toUpperCase(); salvarBD()">
-                    <input style="flex:1" value="${m.cod}" onchange="bd.materiais[${i}].cod=this.value; salvarBD()">
-                    <select onchange="bd.materiais[${i}].grupo=this.value; salvarBD()">${bd.gruposMat.map(g=>`<option ${g==m.grupo?'selected':''}>${g}</option>`)}</select>
-                    <button onclick="bd.materiais.splice(${i},1); salvarBD(); renderGerenciador()">🗑️</button>
+            area.appendChild(gBox);
+        });
+
+        f.innerHTML = `
+            <button class="btn btn-add" onclick="addNovoPaciRapido()">+ CRIAR NOVO PACIENTE</button>
+            <span style="font-size:9px; color:#666; margin-left:10px">Use as setas na aba Grupos para ordenar as caixas.</span>
+        `;
+
+    } else if(abaAtual === 'mat') {
+        c.style.display="block"; c.style.overflowY="auto";
+        bd.materiais.forEach((m,i)=>{
+            c.innerHTML += `<div style="display:flex; gap:5px; margin-bottom:2px">
+                <input style="flex:2" value="${m.nome}" onchange="bd.materiais[${i}].nome=this.value.toUpperCase(); salvarBD()">
+                <input style="flex:1" value="${m.cod}" onchange="bd.materiais[${i}].cod=this.value; salvarBD()">
+                <select onchange="bd.materiais[${i}].grupo=this.value; salvarBD()">${bd.gruposMat.map(g=>`<option ${g==m.grupo?'selected':''}>${g}</option>`)}</select>
+                <button onclick="bd.materiais.splice(${i},1); salvarBD(); renderGerenciador()">🗑️</button>
+            </div>`;
+        });
+        f.innerHTML = `<button class="btn btn-add" onclick="bd.materiais.push({nome:'NOVO', cod:'0', grupo:bd.gruposMat[0]}); salvarBD(); renderGerenciador()">+ MATERIAL</button>`;
+    } else if(abaAtual === 'kit') {
+        c.innerHTML = `<div class="area-kits-lista" id="areaKits" style="flex:1; overflow-y:auto"></div><div class="area-mats-secao" style="flex:1; border-top:2px solid #eee; padding-top:10px"><div class="grid-7-colunas" id="gridMatsKits"></div></div>`;
+        bd.kits.forEach((k, i) => {
+            const box = document.createElement('div'); box.style = "border:1px solid #ddd; padding:10px; border-radius:8px; background:#fff; margin-bottom:5px";
+            box.innerHTML = `
+                <div style="display:flex; justify-content:space-between"><input style="font-weight:bold; width:80%" value="${k.nome}" onchange="bd.kits[${i}].nome=this.value.toUpperCase(); salvarBD()"> <button onclick="bd.kits.splice(${i},1); salvarBD(); renderGerenciador()" style="color:red">🗑️</button></div>
+                <div class="dropzone-kit" ondragover="event.preventDefault()" ondrop="dropNoKit(event, ${i})">
+                    ${k.itens.map((it, itIdx) => `<div class="item-chip"><span class="qtd-click" onclick="editarQtdKit(${i},${itIdx})">${it.qtd}</span>${it.nome} <span onclick="bd.kits[${i}].itens.splice(${itIdx},1); salvarBD(); renderGerenciador()" style="color:red">×</span></div>`).join('') || 'Arraste aqui'}
                 </div>`;
-            });
-            f.innerHTML = `<button class="btn btn-add" onclick="bd.materiais.push({nome:'NOVO', cod:'0', grupo:bd.gruposMat[0]}); salvarBD(); renderGerenciador()">+ MATERIAL</button>`;
-        } else if(abaAtual === 'kit') {
-            c.innerHTML = `<div class="area-kits-lista" id="areaKits"></div><div class="area-mats-secao"><div class="grid-7-colunas" id="gridMatsKits"></div></div>`;
-            bd.kits.forEach((k, i) => {
-                const box = document.createElement('div'); box.style = "border:1px solid #ddd; padding:10px; border-radius:8px; background:#fff; margin-bottom:5px";
-                box.innerHTML = `
-                    <div style="display:flex; justify-content:space-between"><input style="font-weight:bold; width:80%" value="${k.nome}" onchange="bd.kits[${i}].nome=this.value.toUpperCase(); salvarBD()"> <button onclick="bd.kits.splice(${i},1); salvarBD(); renderGerenciador()" style="color:red">🗑️</button></div>
-                    <div class="dropzone-kit" ondragover="event.preventDefault()" ondrop="dropNoKit(event, ${i})">
-                        ${k.itens.map((it, itIdx) => `<div class="item-chip"><span class="qtd-click" onclick="editarQtdKit(${i},${itIdx})">${it.qtd}</span>${it.nome} <span onclick="bd.kits[${i}].itens.splice(${itIdx},1); salvarBD(); renderGerenciador()" style="color:red">×</span></div>`).join('') || 'Arraste aqui'}
-                    </div>`;
-                document.getElementById('areaKits').appendChild(box);
-            });
-            bd.materiais.sort((a,b)=>a.nome.localeCompare(b.nome)).forEach(m => {
-                const b = document.createElement('div'); b.className='balao-grid'; b.draggable=true; b.innerHTML=`<b>${m.nome}</b>`;
-                b.ondragstart=(e)=>e.dataTransfer.setData('material_data', JSON.stringify(m));
-                document.getElementById('gridMatsKits').appendChild(b);
-            });
-            f.innerHTML = `<button class="btn btn-add" onclick="bd.kits.push({nome:'NOVO KIT', itens:[]}); salvarBD(); renderGerenciador()">+ KIT</button>`;
-        } else if(abaAtual === 'grupos') {
-            bd.gruposMat.forEach((g,i)=>{
-                c.innerHTML += `<div style="display:flex; gap:5px; margin-bottom:5px"><input value="${g}" onchange="bd.gruposMat[${i}]=this.value.toUpperCase(); salvarBD()"> <button onclick="bd.gruposMat.splice(${i},1); salvarBD(); renderGerenciador()">🗑️</button></div>`;
-            });
-            f.innerHTML = `<button class="btn btn-add" onclick="const n=prompt('Nome do Grupo:'); if(n){bd.gruposMat.push(n.toUpperCase()); salvarBD(); renderGerenciador()}">+ NOVO GRUPO</button>`;
-        }
+            document.getElementById('areaKits').appendChild(box);
+        });
+        bd.materiais.sort((a,b)=>a.nome.localeCompare(b.nome)).forEach(m => {
+            const b = document.createElement('div'); b.className='balao-grid'; b.draggable=true; b.innerHTML=`<b>${m.nome}</b>`;
+            b.ondragstart=(e)=>e.dataTransfer.setData('material_data', JSON.stringify(m));
+            document.getElementById('gridMatsKits').appendChild(b);
+        });
+        f.innerHTML = `<button class="btn btn-add" onclick="bd.kits.push({nome:'NOVO KIT', itens:[]}); salvarBD(); renderGerenciador()">+ KIT</button>`;
+    } else if(abaAtual === 'grupos') {
+        c.style.display="block"; c.style.overflowY="auto";
+        c.innerHTML = "<h4>Grupos de Materiais</h4>";
+        bd.gruposMat.forEach((g,i)=>{
+            c.innerHTML += `
+            <div style="display:flex; gap:5px; margin-bottom:5px">
+                <button onclick="moverItem(bd.gruposMat, ${i}, -1); salvarBD(); renderGerenciador()">↑</button>
+                <button onclick="moverItem(bd.gruposMat, ${i}, 1); salvarBD(); renderGerenciador()">↓</button>
+                <input style="flex:1" value="${g}" onchange="bd.gruposMat[${i}]=this.value.toUpperCase(); salvarBD()"> 
+                <button onclick="bd.gruposMat.splice(${i},1); salvarBD(); renderGerenciador()">🗑️</button>
+            </div>`;
+        });
+        c.innerHTML += "<hr><h4>Grupos de Pacientes</h4>";
+        (bd.gruposPaci || ["GERAL"]).forEach((g,i)=>{
+            c.innerHTML += `
+            <div style="display:flex; gap:5px; margin-bottom:5px">
+                <button onclick="moverItem(bd.gruposPaci, ${i}, -1); salvarBD(); renderGerenciador()">↑</button>
+                <button onclick="moverItem(bd.gruposPaci, ${i}, 1); salvarBD(); renderGerenciador()">↓</button>
+                <input style="flex:1" value="${g}" onchange="bd.gruposPaci[${i}]=this.value.toUpperCase(); salvarBD()"> 
+                <button onclick="bd.gruposPaci.splice(${i},1); salvarBD(); renderGerenciador()">🗑️</button>
+            </div>`;
+        });
+        f.innerHTML = `
+            <button class="btn btn-add" onclick="const n=prompt('Grupo Material:'); if(n){bd.gruposMat.push(n.toUpperCase()); salvarBD(); renderGerenciador()}">+ GRUPO MAT</button>
+            <button class="btn btn-add" style="background:#0056b3" onclick="const n=prompt('Grupo Paciente:'); if(n){if(!bd.gruposPaci)bd.gruposPaci=[]; bd.gruposPaci.push(n.toUpperCase()); salvarBD(); renderGerenciador()}">+ GRUPO PACI</button>
+        `;
     }
+}
 
     function dropNoKit(e, kitIdx) {
         const m = JSON.parse(e.dataTransfer.getData('material_data'));
@@ -373,9 +563,9 @@ function colarDoExcel() {
     function restaurarBackup(i) { const r=new FileReader(); r.onload=()=>{ let d=JSON.parse(r.result); if(d.produtos && !d.materiais)d.materiais=d.produtos; if(d.grupos && !d.gruposMat)d.gruposMat=d.grupos; bd=d; salvarBD(); location.reload(); }; r.readAsText(i.files[0]); }
     function limparTudo() { if(confirm("Limpar lista atual?")){ listaGlobal=[]; renderTabela(); } }
 
+    // Inicialização ao carregar a página
     renderLaterais();
     renderTabela();
 </script>
 </body>
-
 </html>
