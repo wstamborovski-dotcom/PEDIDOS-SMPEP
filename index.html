@@ -191,14 +191,7 @@
             let matBD = bd.materiais.find(m => m.nome === nomeUnico || m.cod === nomeUnico);
             resultados.push({
                 cod: matBD ? matBD.cod : "S/C",
-                nome: matBD ? matBD.nome : nomeUnico,
-                qtd: 1
-            });
-        }
-        return resultados;
-    }
-
-    function renderTabela() {
+function renderTabela() {
         const corpo = document.getElementById('corpoTabela'); corpo.innerHTML = "";
         document.getElementById('msgDrop').style.display = listaGlobal.length === 0 ? "block" : "none";
         listaGlobal.forEach((p, idx) => {
@@ -219,119 +212,70 @@
         atualizarResumo();
     }
 
-    function salvarBD() { 
-        localStorage.setItem('bd_v49', JSON.stringify(bd)); 
-        renderLaterais(); 
-    }
-
-    // Função para atualizar o gerenciador sem perder o scroll
-    function atualizarGerenciadorComScroll() {
-        const modalCorpo = document.getElementById('corpoGerenciador');
-        const scrollPos = modalCorpo.scrollTop; // Salva a posição atual
-        
-        renderGerenciador(); // Reconstrói a interface
-        
-        // Devolve o scroll para onde estava (com um pequeno delay para o navegador processar o novo HTML)
-        setTimeout(() => {
-            modalCorpo.scrollTop = scrollPos;
-        }, 10);
-    }
-
-    function dropItemNaLinha(e, idx) {
-        e.stopPropagation(); e.preventDefault();
-        const mData = e.dataTransfer.getData('material_data');
-        const kData = e.dataTransfer.getData('kit');
-        if(mData) { const m = JSON.parse(mData); const q = prompt(`Qtd ${m.nome}:`, "1"); if(q) addItenAoPaciente(idx, m.nome, m.cod, q); }
-        if(kData) { const k = JSON.parse(kData); k.itens.forEach(it => { addItenAoPaciente(idx, it.nome, it.cod, it.qtd); }); }
-    }
-
-    function addItenAoPaciente(pIdx, nome, cod, qtd) {
-        let ex = listaGlobal[pIdx].itens.find(i => i.nome === nome);
-        if(ex) ex.qtd = parseInt(ex.qtd) + parseInt(qtd); 
-        else listaGlobal[pIdx].itens.push({ nome, cod, qtd: parseInt(qtd) });
-        renderTabela();
-    }
-
-    function editarQtdPaci(pIdx, iIdx) {
-        const nova = prompt(`Alterar quantidade:`, listaGlobal[pIdx].itens[iIdx].qtd);
-        if (nova !== null && !isNaN(nova) && nova > 0) { listaGlobal[pIdx].itens[iIdx].qtd = parseInt(nova); renderTabela(); }
-    }
-
     function colarDoExcel() {
         const texto = prompt("Cole os dados (Coluna B: Prontuário, Coluna C: Nome):");
         if (!texto) return;
 
-        // Pergunta o grupo para os pacientes que estão sendo importados
-        let grupoAlvo = prompt("Para qual grupo deseja mover estes pacientes?", "GERAL");
-        if (!grupoAlvo) grupoAlvo = "GERAL";
+        let grupoAlvo = prompt("Para qual grupo deseja mover estes pacientes?", "GERAL") || "GERAL";
         grupoAlvo = grupoAlvo.toUpperCase();
 
-        // Se o grupo não existir no banco, adiciona automaticamente
-        if (!bd.gruposPaci.includes(grupoAlvo)) {
-            bd.gruposPaci.push(grupoAlvo);
-        }
+        if (!bd.gruposPaci.includes(grupoAlvo)) bd.gruposPaci.push(grupoAlvo);
         
         texto.split('\n').forEach(linha => {
             if (!linha.trim()) return;
             const cols = linha.split('\t');
-            
             if (cols.length >= 3) {
                 const pront = cols[1].trim();
                 const nomePaci = cols[2].trim().toUpperCase();
                 const textoMaterial = cols[14] || ""; 
 
-                let pacienteNoBD = bd.pacientes.find(p => String(p.id) === String(pront));
-                
-                if (!pacienteNoBD) {
-                    // Se não existe, cria com o grupo escolhido
+                let paciBD = bd.pacientes.find(p => String(p.id) === String(pront));
+                if (!paciBD) {
                     bd.pacientes.push({ id: pront, nome: nomePaci, cor: "#2ecc71", grupo: grupoAlvo });
                 } else {
-                    // Se já existe, apenas atualiza o grupo para o novo
-                    pacienteNoBD.grupo = grupoAlvo;
+                    paciBD.grupo = grupoAlvo;
                 }
                 
-                salvarBD();
-
-                let paciNaLista = listaGlobal.find(p => String(p.id) === String(pront));
-                if (!paciNaLista) {
-                    paciNaLista = { id: pront, nome: nomePaci, itens: [] };
-                    listaGlobal.push(paciNaLista);
+                let paciLista = listaGlobal.find(p => String(p.id) === String(pront));
+                if (!paciLista) {
+                    paciLista = { id: pront, nome: nomePaci, itens: [] };
+                    listaGlobal.push(paciLista);
                 }
 
                 if (textoMaterial) {
-                    const extraidos = extrairMateriaisTexto(textoMaterial);
-                    extraidos.forEach(item => {
-                        addItenAoPaciente(listaGlobal.indexOf(paciNaLista), item.nome, item.cod, item.qtd);
+                    extrairMateriaisTexto(textoMaterial).forEach(item => {
+                        addItenAoPaciente(listaGlobal.indexOf(paciLista), item.nome, item.cod, item.qtd);
                     });
                 }
             }
         });
+        salvarBD();
         renderTabela();
     }
 
-    function importarCSV(input) {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            e.target.result.split('\n').forEach((linha, i) => {
-                if (i === 0 || !linha.trim()) return;
-                const col = linha.split(';');
-                if (col.length >= 9) {
-                    let paci = listaGlobal.find(p => p.id === col[0]);
-                    if (!paci) { paci = { id: col[0], nome: col[8].trim().toUpperCase(), itens: [] }; listaGlobal.push(paci); }
-                    for (let j = 1; j <= 7; j += 2) {
-                        let codCSV = col[j]?.trim();
-                        let qtdCSV = parseInt(col[j+1]?.trim() || 0);
-                        if (codCSV && qtdCSV > 0) {
-                            let matBD = bd.materiais.find(m => m.cod == codCSV);
-                            addItenAoPaciente(listaGlobal.indexOf(paci), matBD ? matBD.nome : codCSV, codCSV, qtdCSV);
-                        }
+    function baixarCSV() {
+        let csv = "\uFEFFProntuario;P1;Q1;P2;Q2;P3;Q3;P4;Nome_Paciente;Setor\n";
+        listaGlobal.forEach(p => {
+            const dadosPaciBD = bd.pacientes.find(dbP => String(dbP.id) === String(p.id));
+            const setor = dadosPaciBD ? (dadosPaciBD.grupo || "GERAL") : "GERAL";
+
+            if (p.itens.length === 0) {
+                csv += `${p.id};;;;;;;;${p.nome};${setor}\n`;
+            } else {
+                for (let i = 0; i < p.itens.length; i += 3) {
+                    let linha = `${p.id}`;
+                    for (let j = 0; j < 3; j++) {
+                        let it = p.itens[i + j];
+                        linha += it ? `;${it.cod};${it.qtd}` : ";;";
                     }
+                    csv += linha + `;;${p.nome};${setor}\n`;
                 }
-            });
-            renderTabela();
-        };
-        reader.readAsText(input.files[0]);
-        input.value = "";
+            }
+        });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+        a.download = (document.getElementById('nomeArquivoExport').value || "Pedido") + ".csv";
+        a.click();
     }
 
    function baixarCSV() {
