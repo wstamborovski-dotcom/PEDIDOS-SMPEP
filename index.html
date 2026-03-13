@@ -430,22 +430,16 @@ function renderGerenciador() {
             </div>`;
 
         const grid = document.getElementById('gridPaciGerente');
-        bd.pacientes.sort((a,b)=>a.nome.localeCompare(b.nome)).forEach((p, i) => {
-            const b = document.createElement('div'); 
-            b.className='balao-grid'; 
-            b.draggable=true;
-            b.style.position = "relative";
-            
-            // CORREÇÃO: Chamando atualizarGerenciadorComScroll() ao mudar a cor
+        bd.pacientes.sort((a,b)=>a.nome.localeCompare(b.nome)).forEach((p) => {
+            const b = document.createElement('div'); b.className='balao-grid'; b.draggable=true;
             b.innerHTML=`
                 <div class="dot" style="background:${p.cor}; width:12px; height:12px; margin:0 auto 5px; cursor:pointer" 
                      onclick="bd.pacientes.find(x=>x.id==='${p.id}').cor=proximaCor('${p.cor}'); salvarBD(); atualizarGerenciadorComScroll()" title="Mudar Cor"></div>
-                <b style="display:block; margin-bottom:5px; cursor:grab">${p.nome}</b>
+                <b style="display:block; margin-bottom:5px;">${p.nome}</b>
                 <div style="display:flex; gap:2px; justify-content:center">
-                    <button onclick="editarPaciDados('${p.id}')" style="font-size:8px; padding:2px; cursor:pointer">✏️</button>
-                    <button onclick="if(confirm('Excluir ${p.nome}?')){bd.pacientes.splice(bd.pacientes.findIndex(x=>x.id==='${p.id}'),1); salvarBD(); atualizarGerenciadorComScroll()}" style="font-size:8px; padding:2px; cursor:pointer">🗑️</button>
-                </div>
-            `;
+                    <button onclick="editarPaciDados('${p.id}')">✏️</button>
+                    <button onclick="if(confirm('Excluir ${p.nome}?')){const idx=bd.pacientes.findIndex(x=>x.id==='${p.id}'); bd.pacientes.splice(idx,1); salvarBD(); atualizarGerenciadorComScroll()}">🗑️</button>
+                </div>`;
             b.ondragstart=(e)=>e.dataTransfer.setData('paci_id', p.id);
             grid.appendChild(b);
         });
